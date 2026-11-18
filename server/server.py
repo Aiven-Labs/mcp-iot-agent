@@ -40,9 +40,19 @@ mcp = FastMCP(
 
 
 def publish(cmd: str, **fields) -> None:
+    """Send a command to Kafka and raise if it wasn't delivered."""
     msg = {"v": 1, "ts": time.time(), "cmd": cmd, **fields}
-    producer.produce(TOPIC, json.dumps(msg).encode())
-    producer.flush(5)
+    errors: list[str] = []
+
+    def on_delivery(err, _msg):
+        if err is not None:
+            errors.append(str(err))
+
+    producer.produce(TOPIC, json.dumps(msg).encode(), callback=on_delivery)
+    undelivered = producer.flush(10)
+    if errors or undelivered:
+        # Surfaces to the agent as a tool error instead of a false "success"
+        raise RuntimeError(f"Kafka delivery failed: {errors[0] if errors else 'timed out'}")
 
 
 @mcp.tool()

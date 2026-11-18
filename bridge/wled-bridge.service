@@ -1,0 +1,14 @@
+[Unit]
+Description=Tetris table Kafka-to-WLED bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/wled-bridge
+EnvironmentFile=/opt/wled-bridge/.env
+ExecStart=/opt/wled-bridge/.venv/bin/python bridge.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
