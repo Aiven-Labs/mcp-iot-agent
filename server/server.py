@@ -1,0 +1,103 @@
+"""Tetris table MCP server.
+
+Exposes tools that publish JSON commands to an Aiven for Kafka topic.
+A bridge on the home network consumes the topic and drives WLED.
+"""
+import hmac
+import json
+import os
+import time
+
+from confluent_kafka import Producer
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.responses import JSONResponse
+
+TOPIC = os.environ.get("KAFKA_TOPIC", "table-lights")
+AUTH_TOKEN = os.environ["MCP_AUTH_TOKEN"]
+
+# Aiven Kafka client-cert auth. PEM contents come in as env vars, so no
+# files need to exist in the container.
+producer = Producer({
+    "bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"],
+    "security.protocol": "SSL",
+    "ssl.ca.pem": os.environ["KAFKA_CA_CERT"],
+    "ssl.certificate.pem": os.environ["KAFKA_ACCESS_CERT"],
+    "ssl.key.pem": os.environ["KAFKA_ACCESS_KEY"],
+})
+
+# Remembers the last command sent. The server can't reach WLED, so this is
+# the "desired state", not a live reading from the lights.
+last_state: dict = {"color": None, "brightness": None, "effect": None}
+
+mcp = FastMCP(
+    "tetris-table",
+    stateless_http=True,
+    host="0.0.0.0",
+    # Aiven's proxy sets its own Host header; auth is the bearer token below.
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
+
+
+def publish(cmd: str, **fields) -> None:
+    msg = {"v": 1, "ts": time.time(), "cmd": cmd, **fields}
+    producer.produce(TOPIC, json.dumps(msg).encode())
+    producer.flush(5)
+
+
+@mcp.tool()
+def set_color(r: int, g: int, b: int) -> str:
+    """Set the Tetris table's lights to a solid RGB colour (each value 0-255)."""
+    rgb = [max(0, min(255, v)) for v in (r, g, b)]
+    publish("set_color", rgb=rgb)
+    last_state["color"] = rgb
+    return f"Colour set to {rgb}"
+
+
+@mcp.tool()
+def set_brightness(brightness: int) -> str:
+    """Set overall brightness, 0 (off) to 255 (full)."""
+    value = max(0, min(255, brightness))
+    publish("set_brightness", brightness=value)
+    last_state["brightness"] = value
+    return f"Brightness set to {value}"
+
+
+@mcp.tool()
+def set_effect(effect: str) -> str:
+    """Start a WLED effect by name, e.g. 'Rainbow', 'Fire 2012', 'Chase', 'Solid'."""
+    publish("set_effect", effect=effect)
+    last_state["effect"] = effect
+    return f"Effect set to {effect}"
+
+
+@mcp.tool()
+def get_state() -> dict:
+    """Return the last colour, brightness and effect that were requested."""
+    return last_state
+
+
+class BearerAuth:
+    """ASGI middleware: reject requests without the correct bearer token."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope["headers"])
+            supplied = headers.get(b"authorization", b"").decode()
+            expected = f"Bearer {AUTH_TOKEN}"
+            if not hmac.compare_digest(supplied, expected):
+                response = JSONResponse({"error": "unauthorized"}, status_code=401)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+app = BearerAuth(mcp.streamable_http_app())
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
