@@ -1,0 +1,16 @@
+[Unit]
+Description=Tetris table lights (Kafka to LED strip)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Root is needed for the LED hardware. Stop this before playing the game.
+User=root
+WorkingDirectory=/opt/table-lights
+EnvironmentFile=/opt/table-lights/.env
+ExecStart=/opt/table-lights/.venv/bin/python table_lights.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
