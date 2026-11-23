@@ -37,9 +37,23 @@ sudo python3 tetris_led.py
 sudo systemctl start table-lights     # afterwards
 ```
 
+## What it can show
+
+- Solid colours and brightness, plus built-in effects: solid, rainbow, twinkle, breathe, chase, fire,
+  plasma, aurora, rain, comet, fireworks, wave.
+- **Scrolling text** (`show_text`), using the game's 3x5 font. The table is 10 wide x 20 tall, so text is
+  rotated to run along the long side and the letters fill the width. Tilt your head right to read it
+  (`direction: "down"`), or left for `"up"`.
+- **Freeform pictures and animations** (`draw`, `animate`): the agent sends up to 40 frames of 20 rows x 10
+  characters with a colour code per LED.
+
+Pictures use "row 0 = the end where game pieces spawn". If a picture or text is mirrored or upside down for
+your table, either set `FLIP_X=1` / `FLIP_Y=1` in `.env`, or point `TETRIS_ORIENT_FILE` at the game's
+`tetris_orientation.json` so both agree.
+
 ## Notes
 
 - Brightness is capped by `MAX_BRIGHTNESS` (default 200) so an agent can't draw the full current of
   every LED in white. Raise it only if your power supply is sized for it.
-- Effects: solid, rainbow, twinkle, breathe, chase. `set_color` always switches back to solid.
+- `set_color` always switches back to solid. Anything past the first 200 LEDs (the side panel) stays dark.
 - Commands older than the controller's start are skipped (`auto.offset.reset=latest`).
